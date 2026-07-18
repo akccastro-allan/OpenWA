@@ -2,6 +2,7 @@ import type { Chat, Contact as BaileysContact, WAMessage, WAMessageKey } from '@
 import { ChatSummary, Contact } from '../interfaces/whatsapp-engine.interface';
 import { parseWaId, toNeutralJid as canonicalizeWaId, userPart } from '../identity/wa-id';
 import type { LidMappingStore } from '../identity/lid-mapping-store.service';
+import { ListOptions, resolveListWindow } from '../../common/utils/paginate';
 
 /**
  * Baileys `Contact` does not include a `phoneNumber` field, but WhatsApp Business events may supply
@@ -191,8 +192,12 @@ export class BaileysSessionStore {
     return c ? this.toNeutralContact(c) : null;
   }
 
-  listChats(): ChatSummary[] {
-    return [...this.chats.values()].map(c => this.toNeutralChat(c));
+  listChats(options: ListOptions = {}): ChatSummary[] {
+    const { limit, offset } = resolveListWindow(options.limit, options.offset);
+    return [...this.chats.values()]
+      .sort((a, b) => this.chatTimestamp(b) - this.chatTimestamp(a))
+      .slice(offset, offset + limit)
+      .map(c => this.toNeutralChat(c));
   }
 
   lastMessage(chatId: string): { key: WAMessageKey; timestamp: number } | null {
@@ -281,6 +286,10 @@ export class BaileysSessionStore {
       isBlocked: false, // best-effort: blocklist state is not tracked in this slice
       profilePicUrl: c.imgUrl ?? undefined,
     };
+  }
+
+  private chatTimestamp(c: Chat): number {
+    return this.lastMessages.get(c.id)?.timestamp ?? this.toUnixSeconds(c.conversationTimestamp);
   }
 
   private toNeutralChat(c: Chat): ChatSummary {

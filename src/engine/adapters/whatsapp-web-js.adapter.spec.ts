@@ -206,6 +206,54 @@ describe('WhatsAppWebJsAdapter readiness guard (#100)', () => {
   });
 });
 
+describe('WhatsAppWebJsAdapter.getChats pagination', () => {
+  const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
+    const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
+    (adapter as unknown as { status: EngineStatus }).status = EngineStatus.READY;
+    (adapter as unknown as { client: unknown }).client = client;
+    return adapter;
+  };
+
+  afterEach(() => {
+    delete (globalThis as unknown as { Store?: unknown }).Store;
+  });
+
+  it('selects only the requested recent chat page inside the page context', async () => {
+    (globalThis as unknown as { Store?: unknown }).Store = {
+      Chat: {
+        models: [
+          { id: { _serialized: 'old@c.us' }, name: 'Old', timestamp: 10 },
+          { id: { _serialized: 'new@c.us' }, name: 'New', timestamp: 30 },
+          { id: { _serialized: 'middle@c.us' }, name: 'Middle', timestamp: 20 },
+          { name: 'No id', timestamp: 40 },
+        ],
+      },
+    };
+    const evaluate = jest.fn((fn: (limit: number, offset: number) => unknown, limit: number, offset: number) =>
+      Promise.resolve(fn(limit, offset)),
+    );
+    const getChats = jest.fn();
+    const adapter = readyAdapter({ pupPage: { evaluate }, getChats });
+
+    const page = await adapter.getChats({ limit: 1, offset: 1 });
+
+    expect(evaluate).toHaveBeenCalledWith(expect.any(Function), 1, 1);
+    expect(getChats).not.toHaveBeenCalled();
+    expect(page).toEqual([
+      { id: 'middle@c.us', name: 'Middle', isGroup: false, unreadCount: 0, timestamp: 20, lastMessage: undefined },
+    ]);
+  });
+
+  it('normalizes unsafe list windows before evaluating the page', async () => {
+    const evaluate = jest.fn(() => Promise.resolve([]));
+    const adapter = readyAdapter({ pupPage: { evaluate } });
+
+    await adapter.getChats({ limit: Number.NaN, offset: -5 });
+
+    expect(evaluate).toHaveBeenCalledWith(expect.any(Function), 1000, 0);
+  });
+});
+
 describe('WhatsAppWebJsAdapter.getChatHistory enrichment (parity with the live path)', () => {
   const readyAdapter = (client: unknown): WhatsAppWebJsAdapter => {
     const adapter = new WhatsAppWebJsAdapter({ sessionId: 's', sessionDataPath: './data/sessions', puppeteer: {} });
