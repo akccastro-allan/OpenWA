@@ -28,6 +28,7 @@ import {
   ProductQueryOptions,
   PaginatedProducts,
   ChatSummary,
+  ChatListOptions,
   ChatState,
   DeliveryStatus,
   RevokedMessage,
@@ -75,6 +76,23 @@ export function wwebjsAckToDeliveryStatus(ack: number): DeliveryStatus {
   if (ack === 1) return 'sent';
   return 'pending';
 }
+
+function normalizeChatListWindow(options: ChatListOptions = {}): { limit: number; offset: number } {
+  const offset = typeof options.offset === 'number' && Number.isFinite(options.offset) ? Math.max(Math.trunc(options.offset), 0) : 0;
+  const limit = typeof options.limit === 'number' && Number.isFinite(options.limit) ? Math.min(Math.max(Math.trunc(options.limit), 1), 1000) : 1000;
+  return { limit, offset };
+}
+
+type WWebJsStoreChat = {
+  id?: { _serialized?: string };
+  name?: string;
+  formattedTitle?: string;
+  isGroup?: boolean;
+  unreadCount?: number;
+  timestamp?: number;
+  t?: number;
+  lastMessage?: { type?: string; body?: string };
+};
 
 /**
  * Extract call detail from a whatsapp-web.js `call_log` message, or `undefined` for any other type.
@@ -1696,39 +1714,48 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   /* eslint-enable @typescript-eslint/require-await, @typescript-eslint/no-unused-vars */
 
-  async getChats(): Promise<ChatSummary[]> {
+  async getChats(options: ChatListOptions = {}): Promise<ChatSummary[]> {
     this.ensureReady();
-    const chats = await this.client!.getChats();
-    const summaries: ChatSummary[] = [];
-    let skipped = 0;
+    const { limit, offset } = normalizeChatListWindow(options);
+    const page = (this.client as unknown as {
+      pupPage?: { evaluate: <T>(fn: (limit: number, offset: number) => T, limit: number, offset: number) => Promise<T> };
+    }).pupPage;
 
-    // Map the raw whatsapp-web.js chat objects to the library-agnostic ChatSummary
-    // shape so that no library types leak past the engine boundary. Some WA system
-    // or channel-like entries can lack the normal serialized id; skip those instead
-    // of failing the whole dashboard chats request.
-    for (const chat of chats) {
-      const id = chat.id?._serialized;
-      if (!id) {
-        skipped++;
-        continue;
-      }
+    if (page) {
+      return page.evaluate((limit, offset) => {
+        const store = (globalThis as unknown as { Store?: { Chat?: { models?: WWebJsStoreChat[] } } }).Store;
+        const chats = Array.isArray(store?.Chat?.models) ? [...store.Chat.models] : [];
+        return chats
+          .sort((a, b) => Number(b.timestamp || b.t || 0) - Number(a.timestamp || a.t || 0))
+          .slice(offset, offset + limit)
+          .map(chat => {
+            const id = String(chat.id?._serialized || '');
+            if (!id) return null;
+            return {
+              id,
+              name: String(chat.name || chat.formattedTitle || id),
+              isGroup: Boolean(chat.isGroup),
+              unreadCount: Number(chat.unreadCount || 0),
+              timestamp: Number(chat.timestamp || chat.t || 0),
+              lastMessage: chat.lastMessage?.type === 'location' ? '📍' : chat.lastMessage?.body || undefined,
+            };
+          })
+          .filter(Boolean) as ChatSummary[];
+      }, limit, offset);
+    }
 
-      summaries.push({
-        id,
-        name: chat.name || id,
+    return (await this.client!.getChats())
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(offset, offset + limit)
+      .map(chat => ({
+        id: chat.id?._serialized || '',
+        name: chat.name || chat.id?._serialized || '',
         isGroup: Boolean(chat.isGroup),
         unreadCount: chat.unreadCount || 0,
         timestamp: chat.timestamp || 0,
-        // A location message's body is the base64 map thumbnail; don't surface it as the chat preview.
         lastMessage: chat.lastMessage?.type === MessageTypes.LOCATION ? '📍' : chat.lastMessage?.body || undefined,
-      });
-    }
-
-    if (skipped > 0) {
-      this.logger.warn(`Skipped ${skipped} chat(s) without a serialized id`);
-    }
-
-    return summaries;
+      }))
+      .filter(chat => chat.id);
   }
 
   async sendSeen(chatId: string): Promise<boolean> {

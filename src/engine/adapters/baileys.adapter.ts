@@ -32,6 +32,7 @@ import {
   Status,
   StatusResult,
   ChatSummary,
+  ChatListOptions,
   StatusPostOptions,
 } from '../interfaces/whatsapp-engine.interface';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
@@ -747,9 +748,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
-  async getChats(): Promise<ChatSummary[]> {
+  async getChats(options: ChatListOptions = {}): Promise<ChatSummary[]> {
     this.ensureReady();
-    return this.sessionStore.listChats();
+    return this.sessionStore.listChats(options);
   }
 
   async sendSeen(chatId: string): Promise<boolean> {

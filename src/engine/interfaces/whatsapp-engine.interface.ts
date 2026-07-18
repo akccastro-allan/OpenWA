@@ -320,6 +320,11 @@ export interface PaginatedProducts {
  * Only library-agnostic primitives are leaked here; raw whatsapp-web.js objects are
  * mapped to this shape inside the adapter.
  */
+export interface ChatListOptions {
+  limit?: number;
+  offset?: number;
+}
+
 export interface ChatSummary {
   id: string;
   name: string;
@@ -522,7 +527,7 @@ export interface IWhatsAppEngine {
   sendCatalog(chatId: string, body?: string): Promise<MessageResult>;
 
   // Chats
-  getChats(): Promise<ChatSummary[]>;
+  getChats(options?: ChatListOptions): Promise<ChatSummary[]>;
   sendSeen(chatId: string): Promise<boolean>;
   markUnread(chatId: string): Promise<boolean>;
   deleteChat(chatId: string): Promise<boolean>;

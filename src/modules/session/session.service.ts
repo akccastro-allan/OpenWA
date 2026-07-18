@@ -1335,10 +1335,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       throw new BadRequestException('Session is not started');
     }
 
-    // Most-recent first, then bound the response window. Sorting before the cap means a capped
-    // response is the N newest chats (what clients show first) rather than an arbitrary slice.
-    const chats = [...(await engine.getChats())].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    return paginate(chats, opts.limit, opts.offset);
+    // Push paging down to the engine so mapping/serialization is bounded before returning to HTTP.
+    return engine.getChats(opts);
   }
 
   async sendSeen(id: string, chatId: string): Promise<boolean> {
