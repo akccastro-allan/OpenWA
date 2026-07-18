@@ -53,6 +53,19 @@ describe('BaileysSessionStore', () => {
     });
   });
 
+  it('paginates chats by most recent timestamp before mapping the response page', () => {
+    store.upsertChats([
+      { id: '1@s.whatsapp.net', name: 'One', conversationTimestamp: 10 },
+      { id: '2@s.whatsapp.net', name: 'Two', conversationTimestamp: 30 },
+      { id: '3@s.whatsapp.net', name: 'Three', conversationTimestamp: 20 },
+    ]);
+
+    const page = store.listChats({ limit: 1, offset: 1 });
+
+    expect(page).toHaveLength(1);
+    expect(page[0].id).toBe('3@c.us');
+  });
+
   it('does not overwrite a newer last-message with an older one', () => {
     store.recordMessage({
       key: { remoteJid: 'c@s.whatsapp.net', id: 'NEW' },

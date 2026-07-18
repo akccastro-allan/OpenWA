@@ -78,8 +78,12 @@ export function wwebjsAckToDeliveryStatus(ack: number): DeliveryStatus {
 }
 
 function normalizeChatListWindow(options: ChatListOptions = {}): { limit: number; offset: number } {
-  const offset = typeof options.offset === 'number' && Number.isFinite(options.offset) ? Math.max(Math.trunc(options.offset), 0) : 0;
-  const limit = typeof options.limit === 'number' && Number.isFinite(options.limit) ? Math.min(Math.max(Math.trunc(options.limit), 1), 1000) : 1000;
+  const offset =
+    typeof options.offset === 'number' && Number.isFinite(options.offset) ? Math.max(Math.trunc(options.offset), 0) : 0;
+  const limit =
+    typeof options.limit === 'number' && Number.isFinite(options.limit)
+      ? Math.min(Math.max(Math.trunc(options.limit), 1), 1000)
+      : 1000;
   return { limit, offset };
 }
 
@@ -1717,20 +1721,32 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   async getChats(options: ChatListOptions = {}): Promise<ChatSummary[]> {
     this.ensureReady();
     const { limit, offset } = normalizeChatListWindow(options);
-    const page = (this.client as unknown as {
-      pupPage?: { evaluate: <T>(fn: (limit: number, offset: number) => T, limit: number, offset: number) => Promise<T> };
-    }).pupPage;
+    const page = (
+      this.client as unknown as {
+        pupPage?: {
+          evaluate: <T>(fn: (limit: number, offset: number) => T, limit: number, offset: number) => Promise<T>;
+        };
+      }
+    ).pupPage;
 
     if (page) {
-      return page.evaluate((limit, offset) => {
-        const store = (globalThis as unknown as { Store?: { Chat?: { models?: WWebJsStoreChat[] } } }).Store;
-        const chats = Array.isArray(store?.Chat?.models) ? [...store.Chat.models] : [];
-        return chats
-          .sort((a, b) => Number(b.timestamp || b.t || 0) - Number(a.timestamp || a.t || 0))
-          .slice(offset, offset + limit)
-          .map(chat => {
+      return page.evaluate(
+        (limit, offset) => {
+          const store = (globalThis as unknown as { Store?: { Chat?: { models?: WWebJsStoreChat[] } } }).Store;
+          const chats = Array.isArray(store?.Chat?.models) ? store.Chat.models : [];
+          const targetSize = offset + limit;
+          const recent: WWebJsStoreChat[] = [];
+          for (const chat of chats) {
+            if (!chat.id?._serialized) continue;
+            const timestamp = Number(chat.timestamp || chat.t || 0);
+            let insertAt = recent.findIndex(item => timestamp > Number(item.timestamp || item.t || 0));
+            if (insertAt === -1) insertAt = recent.length;
+            if (insertAt >= targetSize) continue;
+            recent.splice(insertAt, 0, chat);
+            if (recent.length > targetSize) recent.pop();
+          }
+          return recent.slice(offset).map(chat => {
             const id = String(chat.id?._serialized || '');
-            if (!id) return null;
             return {
               id,
               name: String(chat.name || chat.formattedTitle || id),
@@ -1739,9 +1755,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
               timestamp: Number(chat.timestamp || chat.t || 0),
               lastMessage: chat.lastMessage?.type === 'location' ? '📍' : chat.lastMessage?.body || undefined,
             };
-          })
-          .filter(Boolean) as ChatSummary[];
-      }, limit, offset);
+          });
+        },
+        limit,
+        offset,
+      );
     }
 
     return (await this.client!.getChats())
