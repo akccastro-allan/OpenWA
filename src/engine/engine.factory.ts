@@ -144,7 +144,7 @@ export class EngineFactory implements OnModuleInit {
     // Legacy direct creation (fallback)
     return new WhatsAppWebJsAdapter({
       sessionId: options.sessionId,
-      sessionDataPath: this.configService.get<string>('engine.sessionDataPath') ?? './data/sessions',
+      sessionDataPath: this.configService.get<string>('engine.sessionDataPath') ?? '/app/data/sessions',
       puppeteer: {
         headless: this.configService.get<boolean>('engine.puppeteer.headless') ?? true,
         args: this.configService.get<string[]>('engine.puppeteer.args') ?? ['--no-sandbox', '--disable-setuid-sandbox'],

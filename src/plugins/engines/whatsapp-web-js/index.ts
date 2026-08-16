@@ -51,7 +51,7 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
       puppeteer?: { headless?: boolean; args?: string[]; executablePath?: string };
     };
     const puppeteer = engineConfig.puppeteer ?? {};
-    const sessionDataPath = engineConfig.sessionDataPath ?? './data/sessions';
+    const sessionDataPath = engineConfig.sessionDataPath ?? '/app/data/sessions';
     const headless = puppeteer.headless ?? true;
     const puppeteerArgs = puppeteer.args ?? ['--no-sandbox', '--disable-setuid-sandbox'];
     const executablePath = puppeteer.executablePath;
