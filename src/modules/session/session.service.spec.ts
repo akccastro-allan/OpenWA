@@ -82,6 +82,8 @@ describe('SessionService', () => {
       destroy: jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
       getQRCode: jest.fn().mockReturnValue(null),
+      getPhoneNumber: jest.fn().mockReturnValue(null),
+      getPushName: jest.fn().mockReturnValue(null),
       getGroups: jest.fn().mockResolvedValue([]),
       getChats: jest.fn().mockResolvedValue([]),
       sendSeen: jest.fn().mockResolvedValue(true),
@@ -342,6 +344,45 @@ describe('SessionService', () => {
       (repository.findOne as jest.Mock).mockResolvedValue(null);
 
       await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('getIdentity', () => {
+    it('returns resolved identity when engine provides an international phone number', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ phone: '552133946108', pushName: 'Lips' }));
+      mockEngine.getPhoneNumber.mockReturnValue('552133946108');
+      mockEngine.getPushName.mockReturnValue('Auto Pecas Lips');
+      (service as unknown as { engines: Map<string, unknown> }).engines.set('sess-uuid-1', mockEngine as unknown);
+
+      const result = await service.getIdentity('sess-uuid-1');
+
+      expect(result.ok).toBe(true);
+      expect(result.identity.provider).toBe('openwa');
+      expect(result.identity.phoneRaw).toBe('552133946108');
+      expect(result.identity.phoneE164).toBe('+552133946108');
+      expect(result.identity.providerAccountId).toBe('552133946108@c.us');
+      expect(result.identity.resolved).toBe(true);
+      expect(result.identity.source).toEqual({ enginePhone: true, persistedSession: true });
+      expect(result.reason).toBeUndefined();
+    });
+
+    it('returns partial identity with IDENTITY_PENDING when only a local-format phone exists', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ phone: '21982411499', pushName: 'Tester' }));
+      mockEngine.getPhoneNumber.mockReturnValue('21982411499');
+      mockEngine.getPushName.mockReturnValue('Tester');
+      (service as unknown as { engines: Map<string, unknown> }).engines.set('sess-uuid-1', mockEngine as unknown);
+
+      const result = await service.getIdentity('sess-uuid-1');
+
+      expect(result.identity.phoneRaw).toBe('21982411499');
+      expect(result.identity.phoneE164).toBeNull();
+      expect(result.identity.resolved).toBe(false);
+      expect(result.reason).toBe('IDENTITY_PENDING');
+    });
+
+    it('fails consistently when the session has no live engine', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      await expect(service.getIdentity('sess-uuid-1')).rejects.toThrow(ConflictException);
     });
   });
 

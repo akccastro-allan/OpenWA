@@ -15,7 +15,7 @@ import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { MessageBatch } from '../message/entities/message-batch.entity';
-import { CreateSessionDto } from './dto';
+import { CreateSessionDto, SessionIdentityResponseDto } from './dto';
 import { EngineFactory } from '../../engine/engine.factory';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { userPart } from '../../engine/identity/wa-id';
@@ -331,6 +331,50 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       throw new NotFoundException(`Session with id '${id}' not found`);
     }
     return this.attachLastError(session);
+  }
+
+  private normalizePhone(phoneRaw: string | null): { phoneRaw: string | null; phoneE164: string | null } {
+    const raw = typeof phoneRaw === 'string' ? phoneRaw.trim() : null;
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!raw || !digits) return { phoneRaw: raw, phoneE164: null };
+    if (raw.startsWith('+')) return { phoneRaw: raw, phoneE164: `+${digits}` };
+    if (digits.length >= 12 && digits.length <= 15) return { phoneRaw: raw, phoneE164: `+${digits}` };
+    return { phoneRaw: raw, phoneE164: null };
+  }
+
+  async getIdentity(id: string): Promise<SessionIdentityResponseDto> {
+    const session = await this.findOne(id);
+    const engine = this.engines.get(id);
+    if (!engine) {
+      throw new ConflictException('Session is not connected. The WhatsApp client is not ready.');
+    }
+
+    const phoneFromEngine = engine.getPhoneNumber();
+    const phoneFromSession = session.phone;
+    const pushName = engine.getPushName() || session.pushName || null;
+    const primaryPhone = phoneFromEngine || phoneFromSession || null;
+    const { phoneRaw, phoneE164 } = this.normalizePhone(primaryPhone);
+    const jid = phoneRaw ? `${String(phoneRaw).replace(/\D/g, '')}@c.us` : null;
+
+    return {
+      ok: true,
+      sessionId: session.id,
+      identity: {
+        provider: 'openwa',
+        phoneRaw,
+        phoneE164,
+        providerAccountId: jid,
+        jid,
+        lid: null,
+        pushName,
+        resolved: Boolean(phoneE164),
+        source: {
+          enginePhone: Boolean(phoneFromEngine),
+          persistedSession: Boolean(phoneFromSession),
+        },
+      },
+      ...(phoneE164 ? {} : { reason: 'IDENTITY_PENDING' }),
+    };
   }
 
   /**

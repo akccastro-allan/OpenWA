@@ -4,6 +4,7 @@ import { SessionService } from './session.service';
 import {
   CreateSessionDto,
   SessionResponseDto,
+  SessionIdentityResponseDto,
   QRCodeResponseDto,
   MarkChatReadDto,
   DeleteChatDto,
@@ -86,6 +87,16 @@ export class SessionController {
   async findOne(@Param('id') id: string): Promise<SessionResponseDto> {
     const session = await this.sessionService.findOne(id);
     return this.transformSession(session);
+  }
+
+  @Get(':id/identity')
+  @ApiOperation({ summary: 'Get resolved identity for a connected session' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Session identity', type: SessionIdentityResponseDto })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: 'Session not connected' })
+  async getIdentity(@Param('id') id: string): Promise<SessionIdentityResponseDto> {
+    return this.sessionService.getIdentity(id);
   }
 
   @Delete(':id')
