@@ -294,7 +294,7 @@ export class InfraController {
     // configuration.ts nests these under engine.puppeteer.{headless,args}; the old flat
     // engine.headless / engine.browserArgs keys never existed, so status always reported defaults.
     const engineHeadless = this.configService.get<boolean>('engine.puppeteer.headless', true) ?? true;
-    const sessionDataPath = this.configService.get<string>('engine.sessionDataPath', './data/sessions');
+    const sessionDataPath = this.configService.get<string>('engine.sessionDataPath', '/app/data/sessions');
     const browserArgs =
       this.configService.get<string[]>('engine.puppeteer.args')?.join(' ') || '--no-sandbox --disable-gpu';
 
@@ -543,7 +543,7 @@ export class InfraController {
         updates.STORAGE_TYPE = config.storage.type || 'local';
         updates.MINIO_BUILTIN = config.storage.builtIn ? 'true' : 'false';
         if (config.storage.type === 'local') {
-          updates.STORAGE_LOCAL_PATH = config.storage.localPath || './data/media';
+          updates.STORAGE_LOCAL_PATH = config.storage.localPath || '/app/data/sessions/media';
           // Switching to local: drop stale S3 keys.
           for (const k of ['S3_ENDPOINT', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_BUCKET', 'S3_REGION']) {
             staleKeys.add(k);
@@ -584,7 +584,7 @@ export class InfraController {
           updates.ENGINE_TYPE = config.engine.type;
         }
         updates.PUPPETEER_HEADLESS = config.engine.headless !== false ? 'true' : 'false';
-        updates.SESSION_DATA_PATH = config.engine.sessionDataPath || './data/sessions';
+        updates.SESSION_DATA_PATH = config.engine.sessionDataPath || '/app/data/sessions';
         updates.PUPPETEER_ARGS = config.engine.browserArgs || '--no-sandbox --disable-gpu';
       }
 

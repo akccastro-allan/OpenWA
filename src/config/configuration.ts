@@ -24,7 +24,7 @@ export default () => ({
     type: 'sqlite' as const,
     // SQLite file for the auth/audit DB. Overridable (e.g. e2e points it at a temp file) so tests
     // never write api keys into the developer's ./data/main.sqlite.
-    database: process.env.MAIN_DATABASE_NAME || './data/main.sqlite',
+    database: process.env.MAIN_DATABASE_NAME || '/app/data/sessions/main.sqlite',
     // Schema management for the auth/audit DB. Default ON (zero-config first boot).
     // Set MAIN_DATABASE_SYNCHRONIZE=false to manage schema via the main-owned migrations
     // instead (migrationsRun then creates api_keys/audit_logs). When disabled, run the
@@ -39,7 +39,7 @@ export default () => ({
   dataDatabase: {
     type: process.env.DATABASE_TYPE || 'sqlite',
     // SQLite path (used when type is sqlite)
-    database: process.env.DATABASE_NAME || './data/openwa.sqlite',
+    database: process.env.DATABASE_NAME || '/app/data/sessions/openwa.sqlite',
     // Postgres database NAME (used when type is postgres). Resolved from the same
     // DATABASE_NAME env as the migration CLI (data-source.ts) so the runtime factory and
     // migrations never target different databases. Distinct sqlite-vs-pg defaults.
@@ -81,7 +81,7 @@ export default () => ({
     // Baileys engine (used when ENGINE_TYPE=baileys). Multi-file auth state base dir; each session
     // gets its own subdirectory. Read by the Baileys plugin from the opaque engine config blob.
     baileys: {
-      authDir: process.env.BAILEYS_AUTH_DIR || './data/baileys',
+      authDir: process.env.BAILEYS_AUTH_DIR || '/app/data/sessions/baileys',
     },
   },
 
@@ -145,7 +145,7 @@ export default () => ({
   // Storage configuration
   storage: {
     type: process.env.STORAGE_TYPE || 'local',
-    localPath: process.env.STORAGE_LOCAL_PATH || './data/media',
+    localPath: process.env.STORAGE_LOCAL_PATH || '/app/data/sessions/media',
     s3: {
       bucket: process.env.S3_BUCKET,
       region: process.env.S3_REGION,
