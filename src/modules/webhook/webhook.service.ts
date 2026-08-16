@@ -7,6 +7,7 @@ import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import { Webhook } from './entities/webhook.entity';
 import { WebhookDeliveryFailure } from './entities/webhook-delivery-failure.entity';
+import { Session } from '../session/entities/session.entity';
 import { recordWebhookDeliveryFailure, statusCodeFromError } from './utils/record-delivery-failure';
 import { CreateWebhookDto, UpdateWebhookDto } from './dto';
 import { createLogger } from '../../common/services/logger.service';
@@ -29,6 +30,9 @@ export interface WebhookPayload {
   event: string;
   timestamp: string;
   sessionId: string;
+  gatewaySessionUuid?: string;
+  sessionName?: string;
+  sessionAlias?: string;
   idempotencyKey: string;
   deliveryId: string;
   data: Record<string, unknown>;
@@ -55,6 +59,8 @@ export class WebhookService {
     private readonly webhookRepository: Repository<Webhook>,
     @InjectRepository(WebhookDeliveryFailure, 'data')
     private readonly failureRepository: Repository<WebhookDeliveryFailure>,
+    @InjectRepository(Session, 'data')
+    private readonly sessionRepository: Repository<Session>,
     private readonly configService: ConfigService,
     private readonly hookManager: HookManager,
     @Optional()
@@ -243,6 +249,8 @@ export class WebhookService {
       w => (w.events.includes(event) || w.events.includes('*')) && evaluateFilters(w.filters, event, data, resolveLid),
     );
 
+    const session = await this.sessionRepository.findOne({ where: { id: sessionId } }).catch(() => null);
+
     // Generate idempotency key (same for all webhooks receiving this event). occurredAt is captured
     // once here and reused for every retry of this dispatch, so recurring lifecycle events get a
     // distinct-per-occurrence key while retries of the same event stay stable.
@@ -260,6 +268,9 @@ export class WebhookService {
         event,
         timestamp: new Date().toISOString(),
         sessionId,
+        gatewaySessionUuid: sessionId,
+        sessionName: session?.name ?? undefined,
+        sessionAlias: session?.name ?? undefined,
         idempotencyKey,
         deliveryId,
         // Give each webhook its own copy of the event data: a webhook:before hook that mutates

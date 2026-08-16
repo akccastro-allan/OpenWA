@@ -50,6 +50,7 @@ describe('WebhookService', () => {
   let service: WebhookService;
   let repository: jest.Mocked<Partial<Repository<Webhook>>>;
   let failureRepository: jest.Mocked<Partial<Repository<WebhookDeliveryFailure>>>;
+  let sessionRepository: jest.Mocked<Partial<Repository<Session>>>;
   let configService: jest.Mocked<Partial<ConfigService>>;
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let webhookQueue: jest.Mocked<Record<string, jest.Mock>>;
@@ -68,6 +69,10 @@ describe('WebhookService', () => {
     failureRepository = {
       insert: jest.fn().mockResolvedValue({}),
       find: jest.fn().mockResolvedValue([]),
+    };
+
+    sessionRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'sess-1', name: 'viciados-01' } as Session),
     };
 
     configService = {
@@ -98,6 +103,7 @@ describe('WebhookService', () => {
         WebhookService,
         { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
         { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+        { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
         { provide: ConfigService, useValue: configService },
         { provide: HookManager, useValue: hookManager },
         { provide: LidMappingStoreService, useValue: lidStore },
@@ -778,6 +784,7 @@ describe('WebhookService', () => {
           WebhookService,
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+          { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
           {
             provide: ConfigService,
             useValue: {
@@ -838,6 +845,7 @@ describe('WebhookService', () => {
           WebhookService,
           { provide: getRepositoryToken(Webhook, 'data'), useValue: repository },
           { provide: getRepositoryToken(WebhookDeliveryFailure, 'data'), useValue: failureRepository },
+          { provide: getRepositoryToken(Session, 'data'), useValue: sessionRepository },
           {
             provide: ConfigService,
             useValue: {
