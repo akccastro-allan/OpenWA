@@ -267,7 +267,7 @@ export class WebhookService {
       const payload: WebhookPayload = {
         event,
         timestamp: new Date().toISOString(),
-        sessionId,
+        sessionId: session?.name ?? sessionId,
         gatewaySessionUuid: sessionId,
         sessionName: session?.name ?? undefined,
         sessionAlias: session?.name ?? undefined,
