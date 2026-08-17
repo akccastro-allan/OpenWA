@@ -406,6 +406,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   private setupEventHandlers(): void {
     if (!this.client) return;
+    const clientEvents = this.client as unknown as EventEmitter;
 
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.client.on('qr', async (qr: string) => {
@@ -451,6 +452,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.client.on('message', async msg => {
+      this.logger.debug('WA event: message', {
+        msgId: extractMessageId(msg.id),
+        from: msg.from,
+        fromMe: msg.fromMe,
+        timestamp: msg.timestamp,
+      });
       try {
         this.lastMessageAt = new Date().toISOString();
         const incomingMessage: IncomingMessage = buildIncomingMessageBase(msg);
@@ -520,6 +527,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
 
     this.client.on('message_create', msg => {
+      this.logger.debug('WA event: message_create', {
+        msgId: extractMessageId(msg.id),
+        from: msg.from,
+        fromMe: msg.fromMe,
+        timestamp: msg.timestamp,
+      });
       // `message_create` fires for every message the account creates — including ones composed on a
       // linked phone, which the `message` event above never delivers. Incoming messages are already
       // handled there, so forward only the account's own outgoing (`fromMe`) messages; this is the
@@ -541,6 +554,16 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // Map the whatsapp-web.js MessageAck integer to the neutral DeliveryStatus here, at the
       // adapter boundary, so no downstream consumer ever sees engine-specific ack codes.
       this.callbacks.onMessageAck?.(msg.id._serialized, wwebjsAckToDeliveryStatus(ack));
+    });
+
+    clientEvents.on('message_ciphertext', (msg: { id?: { _serialized?: string } }) => {
+      this.logger.debug('WA event: message_ciphertext', {
+        msgId: msg?.id ? extractMessageId(msg.id) : null,
+      });
+    });
+
+    clientEvents.on('change_state', (state: string) => {
+      this.logger.debug('WA event: change_state', { state });
     });
 
     this.client.on('message_revoke_everyone', (after, before) => {
@@ -586,6 +609,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.client.on('disconnected', reason => {
       this.clearReadyReconcile();
       this.lastDisconnectedAt = new Date().toISOString();
+      this.logger.debug('WA event: disconnected', { reason });
       this.setStatus(EngineStatus.DISCONNECTED);
       this.callbacks.onDisconnected?.(reason);
     });
