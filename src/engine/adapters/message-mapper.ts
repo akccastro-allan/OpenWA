@@ -42,7 +42,7 @@ export function mapWwebjsMessageType(raw: string): MessageType {
  * unit-testable without constructing a full wwebjs `Message`.
  */
 export interface RawMessageFields {
-  id: { _serialized: string };
+  id: string | { _serialized?: string; id?: string; $1?: string };
   from: string;
   to: string;
   body: string;
@@ -57,6 +57,14 @@ export interface RawMessageFields {
   _data?: { notifyName?: string; ephemeralDuration?: number };
 }
 
+export function extractMessageId(id: RawMessageFields['id'] | undefined): string {
+  if (typeof id === 'string') {
+    return id;
+  }
+  const candidate = id?._serialized ?? id?.id ?? id?.$1;
+  return typeof candidate === 'string' ? candidate : '';
+}
+
 /**
  * Build the synchronous base of an IncomingMessage from a raw wwebjs message.
  * Async enrichment (media, quoted message, saved-contact name) is layered on by
@@ -67,7 +75,7 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
   // for an incoming message it's the reverse. So the chat is `to` when fromMe, else `from`.
   const chatId = msg.fromMe ? msg.to : msg.from;
   const incoming: IncomingMessage = {
-    id: msg.id._serialized,
+    id: extractMessageId(msg.id),
     from: msg.from,
     to: msg.to,
     chatId,

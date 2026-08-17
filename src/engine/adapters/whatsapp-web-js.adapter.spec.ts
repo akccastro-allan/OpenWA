@@ -301,6 +301,35 @@ describe('WhatsAppWebJsAdapter.getChatHistory enrichment (parity with the live p
     });
     expect(out[1].quotedMessage).toEqual({ id: 'Q1', body: 'earlier' });
   });
+
+  it('falls back from a direct @lid lookup to the resolved phone chat and keeps the requested chat id', async () => {
+    const dm = {
+      id: { _serialized: 'M3' },
+      from: '5511999999999@c.us',
+      to: 'me',
+      body: 'direct ok',
+      type: 'chat',
+      timestamp: 300,
+      fromMe: false,
+      hasMedia: false,
+      hasQuotedMsg: false,
+    };
+    const chat = { fetchMessages: jest.fn().mockResolvedValue([dm]) };
+    const getChatById = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('wid not found'))
+      .mockResolvedValueOnce(chat);
+    const client = {
+      getChatById,
+      getContactLidAndPhone: jest.fn().mockResolvedValue([{ lid: '777@lid', pn: '5511999999999@c.us' }]),
+    };
+
+    const out = await readyAdapter(client).getChatHistory('777@lid', 50, false);
+
+    expect(getChatById).toHaveBeenNthCalledWith(1, '777@lid');
+    expect(getChatById).toHaveBeenNthCalledWith(2, '5511999999999@c.us');
+    expect(out[0].chatId).toBe('777@lid');
+  });
 });
 
 describe('WhatsAppWebJsAdapter.forwardMessage (returns the real sent id, not a synthetic fwd_ id)', () => {

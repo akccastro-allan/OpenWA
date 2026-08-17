@@ -29,6 +29,16 @@ describe('buildIncomingMessageBase', () => {
     expect(r.isLidSender).toBeUndefined(); // a normal @c.us sender is not flagged
   });
 
+  it('accepts a raw string message id', () => {
+    const r = buildIncomingMessageBase({ ...base, id: 'MSG2' });
+    expect(r.id).toBe('MSG2');
+  });
+
+  it('falls back to alternate id fields when _serialized is absent', () => {
+    expect(buildIncomingMessageBase({ ...base, id: { id: 'INNER1' } }).id).toBe('INNER1');
+    expect(buildIncomingMessageBase({ ...base, id: { $1: 'INNER2' } }).id).toBe('INNER2');
+  });
+
   it('flags a 1:1 sender identified by an @lid privacy id (#263)', () => {
     const r = buildIncomingMessageBase({ ...base, from: '111@lid' });
     expect(r.isLidSender).toBe(true);

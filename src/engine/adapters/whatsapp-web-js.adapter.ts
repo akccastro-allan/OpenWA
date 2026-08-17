@@ -51,7 +51,7 @@ import {
   WwjsChannelData,
   GroupCreateResult,
 } from '../types/whatsapp-web-js.types';
-import { buildIncomingMessageBase, mapContactFields } from './message-mapper';
+import { buildIncomingMessageBase, extractMessageId, mapContactFields } from './message-mapper';
 import { buildVCard } from './vcard';
 import {
   capInboundMedia,
@@ -97,6 +97,8 @@ type WWebJsStoreChat = {
   t?: number;
   lastMessage?: { type?: string; body?: string };
 };
+
+type WwebjsChat = Awaited<ReturnType<Client['getChatById']>>;
 
 /**
  * Extract call detail from a whatsapp-web.js `call_log` message, or `undefined` for any other type.
@@ -1097,6 +1099,55 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     }
   }
 
+  private async getChatByKnownId(chatId: string): Promise<WwebjsChat> {
+    const candidates = new Set<string>([chatId]);
+    let lastError: unknown;
+
+    try {
+      return await this.client!.getChatById(chatId);
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (chatId.endsWith('@c.us')) {
+      const resolved = await this.resolveSendId(chatId);
+      if (resolved && resolved !== chatId) {
+        candidates.add(resolved);
+      }
+    } else if (chatId.endsWith('@lid')) {
+      const cachedPhone = this.config.lidMappingStore?.getCached(userPart(chatId));
+      if (cachedPhone) {
+        candidates.add(`${cachedPhone}@c.us`);
+      }
+      const resolvedPhone = await this.resolveContactPhone(chatId);
+      if (resolvedPhone) {
+        candidates.add(`${resolvedPhone}@c.us`);
+      }
+    } else {
+      throw lastError instanceof Error ? lastError : new Error(`Chat not found: ${chatId}`);
+    }
+
+    for (const candidate of [...candidates].filter(candidate => candidate !== chatId)) {
+      try {
+        return await this.client!.getChatById(candidate);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    try {
+      const chats = await this.client!.getChats();
+      const chat = chats.find(ch => candidates.has(String(typeof ch.id === 'object' ? ch.id._serialized : ch.id)));
+      if (chat) {
+        return chat as WwebjsChat;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(`Chat not found: ${chatId}`);
+  }
+
   async getGroups(): Promise<Group[]> {
     this.ensureReady();
     const chats = await this.client!.getChats();
@@ -1187,9 +1238,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   async replyToMessage(chatId: string, quotedMsgId: string, text: string): Promise<MessageResult> {
     this.ensureReady();
     // Find the message to quote
-    const chat = await this.client!.getChatById(chatId);
+    const chat = await this.getChatByKnownId(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const quotedMsg = messages.find(m => m.id._serialized === quotedMsgId);
+    const quotedMsg = messages.find(m => extractMessageId(m.id) === quotedMsgId);
 
     if (!quotedMsg) {
       throw new MessageNotFoundError(quotedMsgId);
@@ -1200,16 +1251,16 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // accepts an explicit target (#583 R1).
     const msg = await this.sendResolved(chatId, to => quotedMsg.reply(text, to));
     return {
-      id: msg.id._serialized,
+      id: extractMessageId(msg.id),
       timestamp: msg.timestamp,
     };
   }
 
   async forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
     this.ensureReady();
-    const chat = await this.client!.getChatById(fromChatId);
+    const chat = await this.getChatByKnownId(fromChatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const msgToForward = messages.find(m => m.id._serialized === messageId);
+    const msgToForward = messages.find(m => extractMessageId(m.id) === messageId);
 
     if (!msgToForward) {
       throw new MessageNotFoundError(messageId);
@@ -1233,7 +1284,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // which could cross-drive another row's delivery status. Concurrent forwards to the same chat may
     // mis-identify the copy — acceptable for delivery-status accuracy.
     try {
-      const destChat = await this.client!.getChatById(resolvedTo);
+      const destChat = await this.getChatByKnownId(resolvedTo);
       const sentByMe = (await destChat?.fetchMessages({ limit: 5, fromMe: true })) ?? [];
       let sent: (typeof sentByMe)[number] | undefined;
       for (const m of sentByMe) {
@@ -1242,7 +1293,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         }
       }
       if (sent) {
-        return { id: sent.id._serialized, timestamp: sent.timestamp };
+        return { id: extractMessageId(sent.id), timestamp: sent.timestamp };
       }
     } catch (error) {
       this.logger.warn(`Forward succeeded but recovering the sent message id failed: ${String(error)}`);
@@ -1372,9 +1423,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // NOTE: do NOT resolve chatId to @lid here — whatsapp-web.js reacts using the found message's own
     // id, not this chatId, so LID-resolving the lookup gives no send benefit and would miss a message
     // stored under the pre-migration @c.us chat (#583 R1 review).
-    const chat = await this.client!.getChatById(chatId);
+    const chat = await this.getChatByKnownId(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const message = messages.find(m => m.id._serialized === messageId);
+    const message = messages.find(m => extractMessageId(m.id) === messageId);
     if (!message) {
       throw new MessageNotFoundError(messageId, chatId);
     }
@@ -1384,9 +1435,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   async getMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]> {
     this.ensureReady();
-    const chat = await this.client!.getChatById(chatId);
+    const chat = await this.getChatByKnownId(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const message = messages.find(m => m.id._serialized === messageId);
+    const message = messages.find(m => extractMessageId(m.id) === messageId);
     if (!message) {
       throw new MessageNotFoundError(messageId, chatId);
     }
@@ -1588,7 +1639,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   async getChatHistory(chatId: string, limit: number = 50, includeMedia: boolean = false): Promise<IncomingMessage[]> {
     this.ensureReady();
-    const chat = await this.client!.getChatById(chatId);
+    const chat = await this.getChatByKnownId(chatId);
     const messages = await chat.fetchMessages({ limit });
     const results: IncomingMessage[] = [];
     for (const msg of messages) {
@@ -1617,9 +1668,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (msg.hasQuotedMsg) {
         try {
           const quoted = await msg.getQuotedMessage();
-          out.quotedMessage = { id: quoted.id._serialized, body: quoted.body };
+          out.quotedMessage = { id: extractMessageId(quoted.id), body: quoted.body };
         } catch (error) {
-          this.logger.warn(`Failed to resolve quoted message for ${msg.id._serialized}: ${String(error)}`);
+          this.logger.warn(`Failed to resolve quoted message for ${extractMessageId(msg.id)}: ${String(error)}`);
         }
       }
       if (includeMedia && msg.hasMedia) {
@@ -1628,7 +1679,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           const capped = await this.capInboundMediaFor(msg);
           if (capped) out.media = capped;
         } catch (error) {
-          this.logger.warn(`Failed to download media for ${msg.id._serialized}: ${String(error)}`);
+          this.logger.warn(`Failed to download media for ${extractMessageId(msg.id)}: ${String(error)}`);
         }
       }
       results.push(out);
@@ -1642,9 +1693,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // NOTE: do NOT resolve chatId to @lid here — delete operates on the found message's own key, not
     // this chatId, so LID-resolving the lookup gives no benefit and would miss a message stored under
     // the pre-migration @c.us chat (#583 R1 review).
-    const chat = await this.client!.getChatById(chatId);
+    const chat = await this.getChatByKnownId(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const message = messages.find(m => m.id._serialized === messageId || m.id.id === messageId);
+    const message = messages.find(m => extractMessageId(m.id) === messageId || (typeof m.id === 'object' && m.id.id === messageId));
     if (!message) {
       throw new MessageNotFoundError(messageId, chatId);
     }
