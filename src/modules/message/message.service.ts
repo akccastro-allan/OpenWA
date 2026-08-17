@@ -5,7 +5,7 @@ import { SessionService } from '../session/session.service';
 import { SendTextMessageDto, SendMediaMessageDto, SendAudioMessageDto, MessageResponseDto } from './dto';
 import { SendTemplateMessageDto } from './dto/send-template.dto';
 import { assertBase64WithinMediaCap } from './media-cap.util';
-import { MediaInput, IWhatsAppEngine, MessageResult } from '../../engine/interfaces/whatsapp-engine.interface';
+import { MediaInput, IWhatsAppEngine, IncomingMessage, MessageResult } from '../../engine/interfaces/whatsapp-engine.interface';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { HookManager } from '../../core/hooks';
 import { TemplateService } from '../template/template.service';
@@ -258,12 +258,41 @@ export class MessageService {
    * `@s.whatsapp.net`), and every lid the resolution table maps to that phone.
    */
   private resolveJidCandidates(value: string): string[] {
-    const phone = userPart(value);
-    const candidates = new Set<string>([value, `${phone}@c.us`, `${phone}@s.whatsapp.net`]);
-    for (const lid of this.lidMappingStore.lidsForPhone(phone)) {
+    const raw = userPart(value);
+    const resolvedPhone = value.endsWith('@lid') ? this.lidMappingStore.getCached(raw) ?? raw : raw;
+    const candidates = new Set<string>([value, `${resolvedPhone}@c.us`, `${resolvedPhone}@s.whatsapp.net`]);
+    for (const lid of this.lidMappingStore.lidsForPhone(resolvedPhone)) {
       candidates.add(`${lid}@lid`);
     }
     return [...candidates];
+  }
+
+  private mapStoredHistoryMessage(message: Message, requestedChatId: string): IncomingMessage {
+    const metadata = (message.metadata || {}) as {
+      call?: IncomingMessage['call'];
+      location?: IncomingMessage['location'];
+      media?: IncomingMessage['media'];
+      quotedMessage?: IncomingMessage['quotedMessage'];
+    };
+    const quoted = metadata.quotedMessage;
+
+    return {
+      id: message.waMessageId || message.id,
+      from: message.from,
+      to: message.to,
+      chatId: requestedChatId,
+      body: message.body ?? '',
+      type: message.type as IncomingMessage['type'],
+      timestamp: message.timestamp ?? Math.trunc(message.createdAt.getTime() / 1000),
+      fromMe: message.direction === MessageDirection.OUTGOING,
+      isGroup: requestedChatId.endsWith('@g.us'),
+      isStatusBroadcast: requestedChatId === 'status@broadcast' || message.to === 'status@broadcast',
+      media: metadata.media,
+      call: metadata.call,
+      location: metadata.location,
+      quotedMessage:
+        quoted && quoted.id && quoted.body !== undefined ? { id: String(quoted.id), body: String(quoted.body) } : undefined,
+    };
   }
 
   // ========== Phase 3: Extended Messaging ==========
@@ -521,7 +550,16 @@ export class MessageService {
     const engine = this.getEngine(sessionId);
     const ceiling = deep ? MessageService.MAX_DEEP_CHAT_HISTORY_LIMIT : MessageService.MAX_CHAT_HISTORY_LIMIT;
     const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), ceiling) : 50;
-    return engine.getChatHistory(chatId, safeLimit, deep ? false : includeMedia);
+    try {
+      return await engine.getChatHistory(chatId, safeLimit, deep ? false : includeMedia);
+    } catch (error) {
+      this.logger.warn(`Live chat history failed for ${chatId}; falling back to local history`, {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const { messages } = await this.getMessages(sessionId, { chatId, limit: safeLimit, offset: 0 });
+      return messages.map(message => this.mapStoredHistoryMessage(message, chatId));
+    }
   }
 
   // ========== Delete Message ==========

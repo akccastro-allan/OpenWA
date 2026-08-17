@@ -39,7 +39,7 @@ describe('MessageService', () => {
   let sessionService: jest.Mocked<Partial<SessionService>>;
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let templateService: jest.Mocked<Partial<TemplateService>>;
-  let lidMappingStore: { lidsForPhone: jest.Mock };
+  let lidMappingStore: { getCached: jest.Mock; lidsForPhone: jest.Mock };
   let mockEngine: ReturnType<typeof createMockEngine>;
 
   // Auto-typing is on by default; disable it for the unrelated send tests so they don't incur the
@@ -79,7 +79,10 @@ describe('MessageService', () => {
       resolve: jest.fn(),
     };
 
-    lidMappingStore = { lidsForPhone: jest.fn().mockReturnValue([]) };
+    lidMappingStore = {
+      getCached: jest.fn().mockReturnValue(undefined),
+      lidsForPhone: jest.fn().mockReturnValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -759,6 +762,55 @@ describe('MessageService', () => {
       mockEngine.getChatHistory.mockResolvedValueOnce(fake);
       const result = await service.getChatHistory('sess-1', 'test@c.us');
       expect(result).toBe(fake);
+    });
+
+    it('falls back to locally persisted history when the live engine fails on a direct @lid chat', async () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([
+          [
+            {
+              id: 'db-1',
+              waMessageId: 'WA-1',
+              chatId: '5511999999999@c.us',
+              from: '5511999999999@c.us',
+              to: 'me@c.us',
+              body: 'oi',
+              type: 'text',
+              direction: MessageDirection.INCOMING,
+              timestamp: 1700000000,
+              metadata: { quotedMessage: { id: 'Q-1', body: 'antes' } },
+              createdAt: new Date('2026-08-17T13:00:00Z'),
+            } as Message,
+          ],
+          1,
+        ]),
+      };
+      (repository.createQueryBuilder as jest.Mock).mockReturnValue(qb);
+      mockEngine.getChatHistory.mockRejectedValueOnce(new Error('wid not found'));
+      lidMappingStore.getCached.mockReturnValue('5511999999999');
+
+      const result = await service.getChatHistory('sess-1', '777@lid');
+
+      expect(mockEngine.getChatHistory).toHaveBeenCalledWith('777@lid', 50, false);
+      expect(qb.getManyAndCount).toHaveBeenCalled();
+      expect(lidMappingStore.getCached).toHaveBeenCalledWith('777');
+      const chatIds = qb.andWhere.mock.calls[0][1].chatIds as string[];
+      expect(chatIds).toEqual(expect.arrayContaining(['777@lid', '5511999999999@c.us', '5511999999999@s.whatsapp.net']));
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'WA-1',
+          chatId: '777@lid',
+          body: 'oi',
+          fromMe: false,
+          isGroup: false,
+          quotedMessage: { id: 'Q-1', body: 'antes' },
+        }),
+      ]);
     });
 
     describe('deep mode (#347)', () => {
