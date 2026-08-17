@@ -5,6 +5,7 @@ import {
   CreateSessionDto,
   SessionResponseDto,
   SessionIdentityResponseDto,
+  SessionRuntimeResponseDto,
   QRCodeResponseDto,
   MarkChatReadDto,
   DeleteChatDto,
@@ -97,6 +98,15 @@ export class SessionController {
   @ApiResponse({ status: 409, description: 'Session not connected' })
   async getIdentity(@Param('id') id: string): Promise<SessionIdentityResponseDto> {
     return this.sessionService.getIdentity(id);
+  }
+
+  @Get(':id/runtime')
+  @ApiOperation({ summary: 'Get runtime probe for a connected session' })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Runtime probe', type: SessionRuntimeResponseDto })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  async getRuntime(@Param('id') id: string): Promise<SessionRuntimeResponseDto> {
+    return this.sessionService.getRuntimeProbe(id);
   }
 
   @Delete(':id')

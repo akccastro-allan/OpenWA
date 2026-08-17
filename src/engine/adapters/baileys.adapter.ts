@@ -468,6 +468,27 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.pushName;
   }
 
+  async getRuntimeProbe() {
+    return {
+      declaredStatus: this.status,
+      providerState: this.sock ? 'open' : 'closed',
+      whatsappWebVersion: null,
+      wwjsVersion: null,
+      clientExists: Boolean(this.sock),
+      pageExists: false,
+      pageClosed: null,
+      identityResolved: Boolean(this.phoneNumber),
+      phoneResolved: Boolean(this.phoneNumber),
+      readyEventAt: null,
+      lastMessageAt: null,
+      lastMessageCreateAt: null,
+      lastAckAt: null,
+      lastStateChangeAt: null,
+      lastDisconnectedAt: null,
+      runtimeGeneration: 0,
+    };
+  }
+
   // ----- Messaging -----
 
   async sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult> {

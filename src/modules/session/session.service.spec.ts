@@ -386,6 +386,67 @@ describe('SessionService', () => {
     });
   });
 
+  describe('getRuntimeProbe', () => {
+    it('returns runtime probe details from a live engine', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ status: SessionStatus.READY, phone: '552133946108' }));
+      mockEngine.getRuntimeProbe = jest.fn().mockResolvedValue({
+        declaredStatus: 'ready',
+        providerState: 'CONNECTED',
+        whatsappWebVersion: '2.3000.123',
+        wwjsVersion: '1.34.7',
+        clientExists: true,
+        pageExists: true,
+        pageClosed: false,
+        identityResolved: true,
+        phoneResolved: true,
+        readyEventAt: '2026-08-16T12:00:00.000Z',
+        lastMessageAt: null,
+        lastMessageCreateAt: null,
+        lastAckAt: null,
+        lastStateChangeAt: null,
+        lastDisconnectedAt: null,
+        runtimeGeneration: 123,
+      });
+      (service as unknown as { engines: Map<string, unknown> }).engines.set('sess-uuid-1', mockEngine as unknown);
+
+      const result = await service.getRuntimeProbe('sess-uuid-1');
+
+      expect(result.ok).toBe(true);
+      expect(result.providerState).toBe('CONNECTED');
+      expect(result.wwjsVersion).toBe('1.34.7');
+      expect(result.selfHealScheduled).toBe(false);
+      expect(result.phoneE164).toBe('+552133946108');
+    });
+
+    it('schedules self-heal when declared ready but runtime probe is unhealthy', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ status: SessionStatus.READY, phone: '552133946108' }));
+      mockEngine.getRuntimeProbe = jest.fn().mockResolvedValue({
+        declaredStatus: 'ready',
+        providerState: 'TIMEOUT',
+        whatsappWebVersion: '2.3000.123',
+        wwjsVersion: '1.34.7',
+        clientExists: true,
+        pageExists: true,
+        pageClosed: false,
+        identityResolved: true,
+        phoneResolved: true,
+        readyEventAt: '2026-08-16T12:00:00.000Z',
+        lastMessageAt: null,
+        lastMessageCreateAt: null,
+        lastAckAt: null,
+        lastStateChangeAt: null,
+        lastDisconnectedAt: null,
+        runtimeGeneration: 123,
+      });
+      (service as unknown as { engines: Map<string, unknown> }).engines.set('sess-uuid-1', mockEngine as unknown);
+      jest.spyOn(service as unknown as { scheduleRuntimeSelfHeal: (id: string, s: Session) => boolean }, 'scheduleRuntimeSelfHeal').mockReturnValue(true);
+
+      const result = await service.getRuntimeProbe('sess-uuid-1');
+
+      expect(result.selfHealScheduled).toBe(true);
+    });
+  });
+
   // ── start (concurrency) ───────────────────────────────────────────
   describe('start concurrency', () => {
     it('rejects a concurrent second start for the same id, creating only one engine (no orphan)', async () => {

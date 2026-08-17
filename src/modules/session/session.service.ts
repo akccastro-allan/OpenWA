@@ -15,7 +15,7 @@ import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { MessageBatch } from '../message/entities/message-batch.entity';
-import { CreateSessionDto, SessionIdentityResponseDto } from './dto';
+import { CreateSessionDto, SessionIdentityResponseDto, SessionRuntimeResponseDto } from './dto';
 import { EngineFactory } from '../../engine/engine.factory';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { userPart } from '../../engine/identity/wa-id';
@@ -111,6 +111,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   // Reconnection state per session
   private reconnectStates: Map<string, ReconnectState> = new Map();
+  private runtimeSelfHealAt: Map<string, number> = new Map();
 
   // Last session.status value broadcast per session. Some engines signal one transition via BOTH
   // onStateChanged and a dedicated callback (onQRCode/onDisconnected), so this guards both the WS emit
@@ -374,6 +375,112 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         },
       },
       ...(phoneE164 ? {} : { reason: 'IDENTITY_PENDING' }),
+    };
+  }
+
+  private isRuntimeProbeHealthy(probe: {
+    clientExists: boolean;
+    pageExists: boolean;
+    pageClosed: boolean | null;
+    providerState: string | null;
+    identityResolved: boolean;
+    phoneResolved: boolean;
+  }) {
+    return (
+      probe.clientExists
+      && probe.pageExists
+      && probe.pageClosed !== true
+      && probe.providerState === 'CONNECTED'
+      && probe.identityResolved
+      && probe.phoneResolved
+    );
+  }
+
+  private normalizeE164(phoneRaw: string | null): string | null {
+    const raw = typeof phoneRaw === 'string' ? phoneRaw.trim() : null;
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!raw || !digits) return null;
+    if (raw.startsWith('+')) return `+${digits}`;
+    if (digits.length >= 12 && digits.length <= 15) return `+${digits}`;
+    return null;
+  }
+
+  private scheduleRuntimeSelfHeal(id: string, session: Session): boolean {
+    const last = this.runtimeSelfHealAt.get(id) ?? 0;
+    const now = Date.now();
+    if (now - last < 60_000) {
+      return false;
+    }
+    this.runtimeSelfHealAt.set(id, now);
+    void this.updateStatus(id, SessionStatus.DISCONNECTED).catch(() => undefined);
+    void this.executeReconnect(id, session, this.reconnectStates.get(id) ?? {
+      attempts: 0,
+      timer: null,
+      maxAttempts: 3,
+      baseDelay: 5000,
+    });
+    return true;
+  }
+
+  async getRuntimeProbe(id: string): Promise<SessionRuntimeResponseDto> {
+    const session = await this.findOne(id);
+    const engine = this.engines.get(id);
+    const fallbackPhoneE164 = this.normalizeE164(session.phone);
+
+    if (!engine || typeof engine.getRuntimeProbe !== 'function') {
+      return {
+        ok: true,
+        sessionId: session.id,
+        sessionAlias: session.name,
+        declaredStatus: session.status,
+        providerState: null,
+        whatsappWebVersion: null,
+        wwjsVersion: null,
+        clientExists: false,
+        pageExists: false,
+        pageClosed: null,
+        identityResolved: Boolean(fallbackPhoneE164),
+        phoneResolved: Boolean(fallbackPhoneE164),
+        readyEventAt: null,
+        lastMessageAt: null,
+        lastMessageCreateAt: null,
+        lastAckAt: null,
+        lastStateChangeAt: null,
+        lastDisconnectedAt: null,
+        runtimeGeneration: 0,
+        selfHealScheduled: false,
+        phoneE164: fallbackPhoneE164,
+      };
+    }
+
+    const probe = await engine.getRuntimeProbe();
+    const healthy = this.isRuntimeProbeHealthy(probe);
+    const selfHealScheduled = session.status === SessionStatus.READY && !healthy
+      ? this.scheduleRuntimeSelfHeal(id, session)
+      : false;
+
+    return {
+      ok: true,
+      sessionId: session.id,
+      sessionAlias: session.name,
+      declaredStatus: session.status,
+      providerState: probe.providerState,
+      whatsappWebVersion: probe.whatsappWebVersion,
+      wwjsVersion: probe.wwjsVersion,
+      clientExists: probe.clientExists,
+      pageExists: probe.pageExists,
+      pageClosed: probe.pageClosed,
+      identityResolved: probe.identityResolved,
+      phoneResolved: probe.phoneResolved,
+      readyEventAt: probe.readyEventAt,
+      lastMessageAt: probe.lastMessageAt,
+      lastMessageCreateAt: probe.lastMessageCreateAt,
+      lastAckAt: probe.lastAckAt,
+      lastStateChangeAt: probe.lastStateChangeAt,
+      lastDisconnectedAt: probe.lastDisconnectedAt,
+      runtimeGeneration: probe.runtimeGeneration,
+      selfHealScheduled,
+      phoneE164: this.normalizeE164(session.phone),
     };
   }
 

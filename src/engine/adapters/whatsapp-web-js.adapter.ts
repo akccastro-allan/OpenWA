@@ -227,6 +227,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private qrCode: string | null = null;
   private phoneNumber: string | null = null;
   private pushName: string | null = null;
+  private readonly runtimeGeneration = Date.now() + Math.floor(Math.random() * 1000);
+  private readyEventAt: string | null = null;
+  private lastMessageAt: string | null = null;
+  private lastMessageCreateAt: string | null = null;
+  private lastAckAt: string | null = null;
+  private lastStateChangeAt: string | null = null;
+  private lastDisconnectedAt: string | null = null;
+  private lastAuthenticatedAt: string | null = null;
   private callbacks: EngineEventCallbacks = {};
   private readyReconcileTimer: ReturnType<typeof setTimeout> | null = null;
   private readyReconcileStartedAt = 0;
@@ -429,17 +437,20 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         return;
       }
       this.setStatus(EngineStatus.AUTHENTICATING);
+      this.lastAuthenticatedAt = new Date().toISOString();
       this.qrCode = null;
       this.scheduleReadyReconcile();
     });
 
     this.client.on('ready', () => {
+      this.readyEventAt = new Date().toISOString();
       this.markReadyFromClientInfo();
     });
 
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.client.on('message', async msg => {
       try {
+        this.lastMessageAt = new Date().toISOString();
         const incomingMessage: IncomingMessage = buildIncomingMessageBase(msg);
 
         // Attach the sender's contact info. getContact() gives the real sender (author in groups, from
@@ -516,6 +527,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       }
 
       try {
+        this.lastMessageCreateAt = new Date().toISOString();
         this.callbacks.onMessageCreate?.(buildIncomingMessageBase(msg));
       } catch (error) {
         this.logger.error('Error processing outgoing message', String(error));
@@ -523,6 +535,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
 
     this.client.on('message_ack', (msg, ack) => {
+      this.lastAckAt = new Date().toISOString();
       // Map the whatsapp-web.js MessageAck integer to the neutral DeliveryStatus here, at the
       // adapter boundary, so no downstream consumer ever sees engine-specific ack codes.
       this.callbacks.onMessageAck?.(msg.id._serialized, wwebjsAckToDeliveryStatus(ack));
@@ -570,6 +583,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
     this.client.on('disconnected', reason => {
       this.clearReadyReconcile();
+      this.lastDisconnectedAt = new Date().toISOString();
       this.setStatus(EngineStatus.DISCONNECTED);
       this.callbacks.onDisconnected?.(reason);
     });
@@ -710,6 +724,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   private setStatus(status: EngineStatus): void {
     this.status = status;
+    this.lastStateChangeAt = new Date().toISOString();
     this.callbacks.onStateChanged?.(status);
     this.emit('stateChanged', status);
   }
@@ -836,6 +851,53 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   getPushName(): string | null {
     return this.pushName;
+  }
+
+  async getRuntimeProbe() {
+    const clientExists = Boolean(this.client);
+    const page = (this.client as unknown as { pupPage?: { isClosed?: () => boolean } } | null)?.pupPage;
+    let providerState: string | null = null;
+    let whatsappWebVersion: string | null = null;
+
+    if (this.client) {
+      try {
+        providerState = String(await this.client.getState());
+      } catch {
+        providerState = null;
+      }
+      try {
+        whatsappWebVersion = typeof this.client.getWWebVersion === 'function' ? String(await this.client.getWWebVersion()) : null;
+      } catch {
+        whatsappWebVersion = null;
+      }
+    }
+
+    let wwjsVersion: string | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      wwjsVersion = (require('whatsapp-web.js/package.json') as { version?: string }).version || null;
+    } catch {
+      wwjsVersion = null;
+    }
+
+    return {
+      declaredStatus: this.status,
+      providerState,
+      whatsappWebVersion,
+      wwjsVersion,
+      clientExists,
+      pageExists: Boolean(page),
+      pageClosed: page && typeof page.isClosed === 'function' ? Boolean(page.isClosed()) : null,
+      identityResolved: Boolean(this.phoneNumber),
+      phoneResolved: Boolean(this.phoneNumber),
+      readyEventAt: this.readyEventAt,
+      lastMessageAt: this.lastMessageAt,
+      lastMessageCreateAt: this.lastMessageCreateAt,
+      lastAckAt: this.lastAckAt,
+      lastStateChangeAt: this.lastStateChangeAt,
+      lastDisconnectedAt: this.lastDisconnectedAt,
+      runtimeGeneration: this.runtimeGeneration,
+    };
   }
 
   // Cache of resolved individual recipients: `<phone>@c.us` -> the id `sendMessage` accepts (a

@@ -416,6 +416,25 @@ export interface EngineEventCallbacks {
   onError?: (reason: string) => void;
 }
 
+export interface EngineRuntimeProbe {
+  declaredStatus: EngineStatus;
+  providerState: string | null;
+  whatsappWebVersion: string | null;
+  wwjsVersion: string | null;
+  clientExists: boolean;
+  pageExists: boolean;
+  pageClosed: boolean | null;
+  identityResolved: boolean;
+  phoneResolved: boolean;
+  readyEventAt: string | null;
+  lastMessageAt: string | null;
+  lastMessageCreateAt: string | null;
+  lastAckAt: string | null;
+  lastStateChangeAt: string | null;
+  lastDisconnectedAt: string | null;
+  runtimeGeneration: number;
+}
+
 export interface IWhatsAppEngine {
   // Lifecycle
   initialize(callbacks: EngineEventCallbacks): Promise<void>;
@@ -434,6 +453,7 @@ export interface IWhatsAppEngine {
   requestPairingCode(phoneNumber: string): Promise<string>;
   getPhoneNumber(): string | null;
   getPushName(): string | null;
+  getRuntimeProbe?(): Promise<EngineRuntimeProbe>;
 
   // Messaging - Basic
   sendTextMessage(chatId: string, text: string, mentions?: string[]): Promise<MessageResult>;
