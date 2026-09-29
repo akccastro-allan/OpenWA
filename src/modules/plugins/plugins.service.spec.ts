@@ -224,7 +224,28 @@ describe('PluginsService — getConfigUiHtml (sandboxed config editor)', () => {
     installUi({ configUi: { entry: 'config/escape.html' } }, { 'config/index.html': HTML });
     const outside = path.join(tmpDir, 'outside-secret.txt');
     fs.writeFileSync(outside, 'TOP SECRET');
-    fs.symlinkSync(outside, path.join(pluginsDir, 'cfgui-plg', 'config', 'escape.html'));
+    const link = path.join(pluginsDir, 'cfgui-plg', 'config', 'escape.html');
+
+    // Creating a symlink requires Developer Mode or elevation on Windows, and
+    // requires no privilege on Linux/macOS. The security assertion is the same
+    // either way, so the setup is skipped rather than the assertion: a machine
+    // that cannot create the symlink cannot exercise the escape, and a machine
+    // that can must still prove the escape is denied.
+    const { symlinkSync } = fs;
+    try {
+      symlinkSync(outside, link);
+    } catch (error) {
+      const reason = (error as NodeJS.ErrnoException).code;
+      if (reason === 'EPERM' || reason === 'EACCES') {
+        console.warn(
+          `[skipped] symlink escape test: this account cannot create symlinks (${reason}). ` +
+            'Run with Developer Mode enabled or as an administrator to exercise it.',
+        );
+        return;
+      }
+      throw error;
+    }
+
     expect(() => service.getConfigUiHtml('cfgui-plg')).toThrow(/not found/i);
   });
 });
